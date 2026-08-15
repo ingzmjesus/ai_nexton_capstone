@@ -29,7 +29,10 @@ npm install
 docker compose up -d
 npx prisma migrate deploy
 npx prisma generate
-ollama pull llama3.2   # if using Ollama
+
+# Install Ollama (if not already installed), then pull the model
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.2
 ```
 
 ## Run
