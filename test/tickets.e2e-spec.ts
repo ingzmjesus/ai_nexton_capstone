@@ -16,27 +16,38 @@ import {
 describe('TicketsController (e2e)', () => {
   let app: INestApplication<App>;
 
+  const classificationResult = {
+    category: TicketCategory.AccountAccess,
+    priority: TicketPriority.High,
+    sentiment: TicketSentiment.Frustrated,
+    summary: 'Customer is having trouble accessing their account.',
+    suggestedTeam: SuggestedTeam.AccountSupport,
+    requiresHumanReview: true,
+  };
+
   const prismaMock = {
     $connect: jest.fn().mockResolvedValue(undefined),
     $disconnect: jest.fn().mockResolvedValue(undefined),
     $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
     onModuleInit: jest.fn(),
     onModuleDestroy: jest.fn(),
-    ticket: {
-      create: jest.fn().mockImplementation(async ({ data }) => ({
-        id: 'ticket_e2e_1',
-        message: data.message,
-        createdAt: new Date('2026-08-15T12:00:00.000Z'),
-        classification: {
-          category: TicketCategory.AccountAccess,
-          priority: TicketPriority.High,
-          sentiment: TicketSentiment.Frustrated,
-          summary: 'Customer is having trouble accessing their account.',
-          suggestedTeam: SuggestedTeam.AccountSupport,
-          requiresHumanReview: true,
+    $transaction: jest.fn(async (callback: (tx: unknown) => unknown) =>
+      callback({
+        ticket: {
+          create: jest.fn().mockImplementation(async ({ data }) => ({
+            id: 'ticket_e2e_1',
+            message: data.message,
+            createdAt: new Date('2026-08-15T12:00:00.000Z'),
+          })),
         },
-      })),
-    },
+        classification: {
+          create: jest.fn().mockResolvedValue({
+            ...classificationResult,
+            ticketId: 'ticket_e2e_1',
+          }),
+        },
+      }),
+    ),
   };
 
   beforeEach(async () => {
@@ -84,6 +95,7 @@ describe('TicketsController (e2e)', () => {
       },
     });
     expect(response.body.createdAt).toBeDefined();
+    expect(prismaMock.$transaction).toHaveBeenCalled();
   });
 
   it('POST /tickets rejects an empty message', async () => {

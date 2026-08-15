@@ -2,20 +2,24 @@
 
 NestJS + TypeScript backend that classifies customer support tickets with Ollama, persists results with Prisma/PostgreSQL, and exposes `POST /tickets`.
 
-## Current phase: Phase 3 (AI isolation)
+## Current phase: Phase 4 (orchestration)
 
-- Isolated `AiClassificationService` talking to Ollama (`POST /api/chat`, `format: json`)
-- Forced JSON schema + server-side validation of AI output
-- One retry on invalid AI JSON, then HTTP `502 Bad Gateway`
-- `TICKET_CLASSIFIER` wired to Ollama by default (`CLASSIFIER_PROVIDER=ollama`)
-- Stub classifier still available via `CLASSIFIER_PROVIDER=stub`
+End-to-end `POST /tickets` pipeline:
+
+1. Validate request (`ValidationPipe` + `CreateTicketDto`)
+2. Classify via isolated `TICKET_CLASSIFIER` (Ollama by default)
+3. Re-validate classification before persistence
+4. Save ticket + classification in a **Prisma transaction**
+5. Return `{ id, message, createdAt, classification }`
+
+AI failures → `502` (nothing saved). DB failures → `500`.
 
 ## Prerequisites
 
 - Node.js 22+
 - npm
 - Docker (PostgreSQL) **or** any Postgres matching `DATABASE_URL`
-- [Ollama](https://ollama.com) running locally with a chat model (default `llama3.2`)
+- [Ollama](https://ollama.com) with model `llama3.2` (or set `CLASSIFIER_PROVIDER=stub`)
 
 ## Setup
 
@@ -25,9 +29,7 @@ npm install
 docker compose up -d
 npx prisma migrate deploy
 npx prisma generate
-
-# Install/start Ollama, then pull the model
-ollama pull llama3.2
+ollama pull llama3.2   # if using Ollama
 ```
 
 ## Run
@@ -36,61 +38,54 @@ ollama pull llama3.2
 npm run start:dev
 ```
 
-## Test Phase 3
+## Test Phase 4
 
-### Automated (no live Ollama required)
-
-Unit tests mock the Ollama HTTP client:
+### Automated
 
 ```bash
 npm test
 npm run test:e2e
 ```
 
-### Manual with Ollama
+Unit coverage for orchestration includes:
 
-1. Confirm Ollama is up:
+- happy path (classify → transactional save → response)
+- classifier failure does **not** call `$transaction`
+- invalid classification payload rejected before save
+- persistence failure mapped to `500`
 
-```bash
-curl -s http://localhost:11434/api/tags
-```
-
-2. Ensure `.env` uses the AI provider:
-
-```bash
-CLASSIFIER_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-```
-
-3. Start the API and classify a ticket:
+### Manual end-to-end
 
 ```bash
-npm run start:dev
+# health
+curl -s http://localhost:3000/health
 
+# create ticket (Ollama or stub)
 curl -s -X POST http://localhost:3000/tickets \
   -H 'Content-Type: application/json' \
   -d '{"message":"I cannot reset my password because the link does not work."}'
 ```
 
-Expect HTTP `201` and a `classification` object with:
-
-- `category`, `priority`, `sentiment`, `summary`
-- `suggestedTeam`, `requiresHumanReview`
-
-4. Failure behavior (Ollama stopped):
+Expect HTTP `201` and a full classification object. Confirm both rows exist:
 
 ```bash
-# stop Ollama, then:
-curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/tickets \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}'
-# expect 502
+npx prisma studio
+# tables: tickets, classifications (same ticket id)
 ```
 
-### Offline / stub mode
+### Failure cases
 
-If Ollama is unavailable, you can still exercise the API contract:
+```bash
+# validation → 400
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/tickets \
+  -H 'Content-Type: application/json' -d '{"message":""}'
+
+# AI down (CLASSIFIER_PROVIDER=ollama, Ollama stopped) → 502, no DB row
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/tickets \
+  -H 'Content-Type: application/json' -d '{"message":"hello"}'
+```
+
+### Offline without Ollama
 
 ```bash
 CLASSIFIER_PROVIDER=stub npm run start:dev
@@ -98,47 +93,50 @@ CLASSIFIER_PROVIDER=stub npm run start:dev
 
 ## Scripts
 
-| Script                      | Purpose                                            |
-| --------------------------- | -------------------------------------------------- |
-| `npm run start:dev`         | Dev server with watch                              |
-| `npm run build`             | Compile TypeScript                                 |
-| `npm test`                  | Unit tests (includes AI validator + mocked Ollama) |
-| `npm run test:e2e`          | E2E tests                                          |
-| `npm run prisma:generate`   | Generate Prisma Client                             |
-| `npx prisma migrate deploy` | Apply existing migrations                          |
+| Script                      | Purpose                   |
+| --------------------------- | ------------------------- |
+| `npm run start:dev`         | Dev server with watch     |
+| `npm run build`             | Compile TypeScript        |
+| `npm test`                  | Unit tests                |
+| `npm run test:e2e`          | E2E tests                 |
+| `npm run prisma:generate`   | Generate Prisma Client    |
+| `npx prisma migrate deploy` | Apply existing migrations |
 
 ## Environment
 
-See `.env.example`:
-
-| Variable              | Default                                                             | Purpose             |
-| --------------------- | ------------------------------------------------------------------- | ------------------- |
-| `PORT`                | `3000`                                                              | HTTP port           |
-| `DATABASE_URL`        | `postgresql://tickets:tickets@localhost:5432/tickets?schema=public` | Postgres            |
-| `CLASSIFIER_PROVIDER` | `ollama`                                                            | `ollama` or `stub`  |
-| `OLLAMA_BASE_URL`     | `http://localhost:11434`                                            | Ollama API base URL |
-| `OLLAMA_MODEL`        | `llama3.2`                                                          | Chat model name     |
-| `OLLAMA_TIMEOUT_MS`   | `60000`                                                             | Ollama HTTP timeout |
-
-## AI contract (forced JSON)
-
-Ollama is asked to return only:
-
-```json
-{
-  "category": "Billing | Account Access | Technical Issue | Product Question | Refund | Security | Other",
-  "priority": "Low | Medium | High | Critical",
-  "sentiment": "Positive | Neutral | Negative | Frustrated",
-  "summary": "string",
-  "suggested_team": "Billing | Account Support | Technical Support | Product | Security | General",
-  "requires_human_review": true
-}
-```
-
-Invalid JSON / enum values → one retry → `502` if still invalid.
+| Variable              | Default                                                             | Purpose            |
+| --------------------- | ------------------------------------------------------------------- | ------------------ |
+| `PORT`                | `3000`                                                              | HTTP port          |
+| `DATABASE_URL`        | `postgresql://tickets:tickets@localhost:5432/tickets?schema=public` | Postgres           |
+| `CLASSIFIER_PROVIDER` | `ollama`                                                            | `ollama` or `stub` |
+| `OLLAMA_BASE_URL`     | `http://localhost:11434`                                            | Ollama API         |
+| `OLLAMA_MODEL`        | `llama3.2`                                                          | Chat model         |
+| `OLLAMA_TIMEOUT_MS`   | `60000`                                                             | Ollama timeout     |
 
 ## API
 
-**`POST /tickets`** — same request/response shape as Phase 2; classification now comes from Ollama (unless stub mode).
+**`POST /tickets`**
+
+```json
+{ "message": "string (required, 1–5000 chars)" }
+```
+
+Response `201`:
+
+```json
+{
+  "id": "string",
+  "message": "string",
+  "createdAt": "ISO-8601 datetime",
+  "classification": {
+    "category": "Account Access",
+    "priority": "High",
+    "sentiment": "Frustrated",
+    "summary": "...",
+    "suggestedTeam": "Account Support",
+    "requiresHumanReview": true
+  }
+}
+```
 
 Generated Prisma Client lives at `src/generated/prisma` (gitignored); run `npx prisma generate` after clone.
