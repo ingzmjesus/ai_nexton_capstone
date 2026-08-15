@@ -1,0 +1,12 @@
+// Prisma schema for the AI Support Ticket Classification System.
+// Domain models (Ticket, Classification) land in Phase 1.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
