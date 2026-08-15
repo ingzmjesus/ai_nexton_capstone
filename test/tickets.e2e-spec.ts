@@ -4,6 +4,8 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
+import { StubTicketClassifier } from './../src/tickets/stub-ticket-classifier';
+import { TICKET_CLASSIFIER } from './../src/tickets/ticket-classifier';
 import {
   SuggestedTeam,
   TicketCategory,
@@ -43,6 +45,8 @@ describe('TicketsController (e2e)', () => {
     })
       .overrideProvider(PrismaService)
       .useValue(prismaMock)
+      .overrideProvider(TICKET_CLASSIFIER)
+      .useClass(StubTicketClassifier)
       .compile();
 
     app = moduleFixture.createNestApplication();

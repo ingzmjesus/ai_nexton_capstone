@@ -8,8 +8,8 @@ import {
 import { ClassificationResult, TicketClassifier } from './ticket-classifier';
 
 /**
- * Phase 2 stub classifier.
- * Replaced by the Ollama-backed AiClassificationService in Phase 3.
+ * Keyword-based classifier for offline testing.
+ * Used when CLASSIFIER_PROVIDER=stub (default is Ollama via AiClassificationService).
  */
 @Injectable()
 export class StubTicketClassifier implements TicketClassifier {
