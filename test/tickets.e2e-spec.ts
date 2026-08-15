@@ -1,17 +1,21 @@
+import {
+  BadGatewayException,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
-import { PrismaService } from './../src/prisma/prisma.service';
-import { StubTicketClassifier } from './../src/tickets/stub-ticket-classifier';
-import { TICKET_CLASSIFIER } from './../src/tickets/ticket-classifier';
 import {
   SuggestedTeam,
   TicketCategory,
   TicketPriority,
   TicketSentiment,
 } from './../src/generated/prisma/client';
+import { PrismaService } from './../src/prisma/prisma.service';
+import { StubTicketClassifier } from './../src/tickets/stub-ticket-classifier';
+import { TICKET_CLASSIFIER } from './../src/tickets/ticket-classifier';
 
 describe('TicketsController (e2e)', () => {
   let app: INestApplication<App>;
@@ -50,25 +54,33 @@ describe('TicketsController (e2e)', () => {
     ),
   };
 
-  beforeEach(async () => {
+  async function createApp(
+    classifier: unknown,
+  ): Promise<INestApplication<App>> {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
       .overrideProvider(PrismaService)
       .useValue(prismaMock)
       .overrideProvider(TICKET_CLASSIFIER)
-      .useClass(StubTicketClassifier)
+      .useValue(classifier)
       .compile();
 
-    app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(
+    const nestApp = moduleFixture.createNestApplication();
+    nestApp.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
         forbidNonWhitelisted: true,
         transform: true,
       }),
     );
-    await app.init();
+    await nestApp.init();
+    return nestApp;
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    app = await createApp(new StubTicketClassifier());
   });
 
   afterEach(async () => {
@@ -107,6 +119,24 @@ describe('TicketsController (e2e)', () => {
 
   it('POST /tickets rejects a missing message', async () => {
     await request(app.getHttpServer()).post('/tickets').send({}).expect(400);
+  });
+
+  it('POST /tickets returns 502 when classification fails', async () => {
+    await app.close();
+    app = await createApp({
+      classify: jest
+        .fn()
+        .mockRejectedValue(
+          new BadGatewayException('Ticket classification failed'),
+        ),
+    });
+
+    await request(app.getHttpServer())
+      .post('/tickets')
+      .send({ message: 'I cannot reset my password' })
+      .expect(502);
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
   it('GET /health still works', async () => {

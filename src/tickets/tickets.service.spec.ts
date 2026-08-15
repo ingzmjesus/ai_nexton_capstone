@@ -121,6 +121,48 @@ describe('TicketsService (orchestration)', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('maps unexpected classifier errors to BadGatewayException', async () => {
+    classifier.classify.mockRejectedValue(new Error('boom'));
+
+    await expect(
+      service.create({ message: 'I cannot reset my password' }),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('maps non-Error classifier failures to BadGatewayException', async () => {
+    classifier.classify.mockRejectedValue('string-failure');
+
+    await expect(
+      service.create({ message: 'I cannot reset my password' }),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects whitespace-only messages before classification', async () => {
+    await expect(service.create({ message: '   ' })).rejects.toBeInstanceOf(
+      InternalServerErrorException,
+    );
+
+    expect(classifier.classify).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid enum fields before saving', async () => {
+    classifier.classify.mockResolvedValue({
+      ...classificationResult,
+      category: 'NotReal' as never,
+    });
+
+    await expect(
+      service.create({ message: 'I cannot reset my password' }),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('maps persistence failures to InternalServerErrorException', async () => {
     prisma.$transaction.mockRejectedValue(new Error('db down'));
 

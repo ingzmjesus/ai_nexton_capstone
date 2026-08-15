@@ -2,24 +2,16 @@
 
 NestJS + TypeScript backend that classifies customer support tickets with Ollama, persists results with Prisma/PostgreSQL, and exposes `POST /tickets`.
 
-## Current phase: Phase 4 (orchestration)
+## Current phase: Phase 5 (unit tests)
 
-End-to-end `POST /tickets` pipeline:
-
-1. Validate request (`ValidationPipe` + `CreateTicketDto`)
-2. Classify via isolated `TICKET_CLASSIFIER` (Ollama by default)
-3. Re-validate classification before persistence
-4. Save ticket + classification in a **Prisma transaction**
-5. Return `{ id, message, createdAt, classification }`
-
-AI failures → `502` (nothing saved). DB failures → `500`.
+Expanded automated coverage for the full pipeline — DTO validation, AI response validation, isolated Ollama client (mocked HTTP), orchestration, and e2e API contracts. Live Ollama is **not** required for CI.
 
 ## Prerequisites
 
 - Node.js 22+
 - npm
 - Docker (PostgreSQL) **or** any Postgres matching `DATABASE_URL`
-- [Ollama](https://ollama.com) with model `llama3.2` (or set `CLASSIFIER_PROVIDER=stub`)
+- [Ollama](https://ollama.com) with model `llama3.2` (optional for manual AI tests)
 
 ## Setup
 
@@ -41,69 +33,61 @@ ollama pull llama3.2
 npm run start:dev
 ```
 
-## Test Phase 4
+## Test Phase 5
 
-### Automated
+### Automated (recommended)
 
 ```bash
+# Unit tests (DTO, AI validator, AiClassificationService, TicketsService, stub, config)
 npm test
+
+# Coverage report + threshold gate (statements/lines/functions ≥ 85%, branches ≥ 70%)
+npm run test:cov
+
+# E2E API contract tests (Prisma + classifier mocked; no live Ollama)
 npm run test:e2e
 ```
 
-Unit coverage for orchestration includes:
+What is covered:
 
-- happy path (classify → transactional save → response)
-- classifier failure does **not** call `$transaction`
-- invalid classification payload rejected before save
-- persistence failure mapped to `500`
+| Area                              | File(s)                                            |
+| --------------------------------- | -------------------------------------------------- |
+| Request DTO validation            | `src/tickets/dto/create-ticket.dto.spec.ts`        |
+| AI JSON parse/validate            | `src/ai/classification-response.validator.spec.ts` |
+| Ollama client (mocked HTTP)       | `src/ai/ai-classification.service.spec.ts`         |
+| Orchestration (no partial writes) | `src/tickets/tickets.service.spec.ts`              |
+| Stub classifier                   | `src/tickets/stub-ticket-classifier.spec.ts`       |
+| Config defaults/overrides         | `src/config/configuration.spec.ts`                 |
+| HTTP 201 / 400 / 502              | `test/tickets.e2e-spec.ts`                         |
 
-### Manual end-to-end
+### Manual smoke (optional)
 
 ```bash
-# health
-curl -s http://localhost:3000/health
+CLASSIFIER_PROVIDER=stub npm run start:dev
 
-# create ticket (Ollama or stub)
 curl -s -X POST http://localhost:3000/tickets \
   -H 'Content-Type: application/json' \
   -d '{"message":"I cannot reset my password because the link does not work."}'
 ```
 
-Expect HTTP `201` and a full classification object. Confirm both rows exist:
+With Ollama:
 
 ```bash
-npx prisma studio
-# tables: tickets, classifications (same ticket id)
-```
-
-### Failure cases
-
-```bash
-# validation → 400
-curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/tickets \
-  -H 'Content-Type: application/json' -d '{"message":""}'
-
-# AI down (CLASSIFIER_PROVIDER=ollama, Ollama stopped) → 502, no DB row
-curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/tickets \
-  -H 'Content-Type: application/json' -d '{"message":"hello"}'
-```
-
-### Offline without Ollama
-
-```bash
-CLASSIFIER_PROVIDER=stub npm run start:dev
+CLASSIFIER_PROVIDER=ollama npm run start:dev
+# same curl as above
 ```
 
 ## Scripts
 
-| Script                      | Purpose                   |
-| --------------------------- | ------------------------- |
-| `npm run start:dev`         | Dev server with watch     |
-| `npm run build`             | Compile TypeScript        |
-| `npm test`                  | Unit tests                |
-| `npm run test:e2e`          | E2E tests                 |
-| `npm run prisma:generate`   | Generate Prisma Client    |
-| `npx prisma migrate deploy` | Apply existing migrations |
+| Script                      | Purpose                          |
+| --------------------------- | -------------------------------- |
+| `npm test`                  | Unit tests                       |
+| `npm run test:cov`          | Unit tests + coverage thresholds |
+| `npm run test:e2e`          | E2E tests                        |
+| `npm run start:dev`         | Dev server                       |
+| `npm run build`             | Compile TypeScript               |
+| `npx prisma migrate deploy` | Apply migrations                 |
+| `npx prisma generate`       | Generate Prisma Client           |
 
 ## Environment
 
@@ -118,28 +102,6 @@ CLASSIFIER_PROVIDER=stub npm run start:dev
 
 ## API
 
-**`POST /tickets`**
-
-```json
-{ "message": "string (required, 1–5000 chars)" }
-```
-
-Response `201`:
-
-```json
-{
-  "id": "string",
-  "message": "string",
-  "createdAt": "ISO-8601 datetime",
-  "classification": {
-    "category": "Account Access",
-    "priority": "High",
-    "sentiment": "Frustrated",
-    "summary": "...",
-    "suggestedTeam": "Account Support",
-    "requiresHumanReview": true
-  }
-}
-```
+**`POST /tickets`** — see prior phases for request/response shape. Classification comes from Ollama unless `CLASSIFIER_PROVIDER=stub`.
 
 Generated Prisma Client lives at `src/generated/prisma` (gitignored); run `npx prisma generate` after clone.

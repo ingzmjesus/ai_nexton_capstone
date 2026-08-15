@@ -22,6 +22,16 @@ describe('StubTicketClassifier', () => {
     });
   });
 
+  it('classifies billing questions as billing', async () => {
+    await expect(
+      classifier.classify('I have a question about my invoice'),
+    ).resolves.toMatchObject({
+      category: 'Billing',
+      suggestedTeam: 'Billing',
+      requiresHumanReview: false,
+    });
+  });
+
   it('falls back to Other for unrecognized messages', async () => {
     await expect(classifier.classify('Hello there')).resolves.toMatchObject({
       category: 'Other',
