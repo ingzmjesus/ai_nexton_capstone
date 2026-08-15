@@ -2,37 +2,30 @@
 
 NestJS + TypeScript backend that will classify customer support tickets with Ollama, persist results with Prisma/PostgreSQL, and expose `POST /tickets`.
 
-## Phase 0 (this branch)
+## Current phase: Phase 1 (domain & persistence)
 
-Scaffolding only:
+- NestJS app with `GET /health` (includes database status)
+- Prisma models: `Ticket` + `Classification` (1:1) with approved enums
+- Initial migration applied via Prisma Migrate
+- `PrismaModule` wired into `AppModule`
 
-- NestJS app with TypeScript
-- `@nestjs/config` for `PORT`, `DATABASE_URL`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`
-- Prisma 7 initialized (PostgreSQL) + `PrismaModule` / `PrismaService` stubs
-- `docker-compose.yml` for local Postgres
-- `GET /health` smoke endpoint
-
-Domain models, AI classification, and `POST /tickets` come in later phases.
+AI classification and `POST /tickets` come in later phases.
 
 ## Prerequisites
 
 - Node.js 22+
 - npm
-- Docker (for PostgreSQL)
-- Ollama (used in a later phase; not required for Phase 0)
+- Docker (for PostgreSQL) **or** any Postgres matching `DATABASE_URL`
+- Ollama (later phase; not required yet)
 
 ## Setup
 
 ```bash
 cp .env.example .env
 npm install
-npx prisma generate
-```
-
-Start PostgreSQL:
-
-```bash
 docker compose up -d
+npx prisma migrate deploy
+npx prisma generate
 ```
 
 ## Run
@@ -41,35 +34,62 @@ docker compose up -d
 npm run start:dev
 ```
 
-Smoke check:
+Health check (database should be `up`):
 
 ```bash
 curl http://localhost:3000/health
-# {"status":"ok"}
+# {"status":"ok","database":"up"}
+```
+
+## Test Phase 1
+
+```bash
+# Unit tests (includes Prisma persistence test against DATABASE_URL)
+npm test
+
+# E2E (Prisma is mocked; health contract only)
+npm run test:e2e
+```
+
+Manual persistence check with Prisma Studio:
+
+```bash
+npx prisma studio
 ```
 
 ## Scripts
 
-| Script | Purpose |
-|--------|---------|
-| `npm run start:dev` | Dev server with watch |
-| `npm run build` | Compile TypeScript |
-| `npm test` | Unit tests |
-| `npm run test:e2e` | E2E tests |
-| `npm run prisma:generate` | Generate Prisma Client |
+| Script                      | Purpose                       |
+| --------------------------- | ----------------------------- |
+| `npm run start:dev`         | Dev server with watch         |
+| `npm run build`             | Compile TypeScript            |
+| `npm test`                  | Unit tests                    |
+| `npm run test:e2e`          | E2E tests                     |
+| `npm run prisma:generate`   | Generate Prisma Client        |
+| `npm run prisma:migrate`    | Create/apply migrations (dev) |
+| `npx prisma migrate deploy` | Apply existing migrations     |
 
 ## Environment
 
 See `.env.example`:
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PORT` | `3000` | HTTP port |
-| `DATABASE_URL` | `postgresql://tickets:tickets@localhost:5432/tickets?schema=public` | Postgres connection |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
-| `OLLAMA_MODEL` | `llama3.2` | Model name for classification |
+| Variable          | Default                                                             | Purpose                       |
+| ----------------- | ------------------------------------------------------------------- | ----------------------------- |
+| `PORT`            | `3000`                                                              | HTTP port                     |
+| `DATABASE_URL`    | `postgresql://tickets:tickets@localhost:5432/tickets?schema=public` | Postgres connection           |
+| `OLLAMA_BASE_URL` | `http://localhost:11434`                                            | Ollama API base URL           |
+| `OLLAMA_MODEL`    | `llama3.2`                                                          | Model name for classification |
 
-## Notes
+## Domain model (Phase 1)
 
-- `PrismaModule` is prepared under `src/prisma/` but not imported into `AppModule` yet. Phase 1 wires it after Ticket/Classification models and migrations exist.
-- Generated Prisma Client lives at `src/generated/prisma` (gitignored); run `npx prisma generate` after clone.
+- **Ticket**: `id`, `message`, timestamps
+- **Classification** (1:1): `category`, `priority`, `sentiment`, `summary`, `suggestedTeam`, `requiresHumanReview`
+
+Enums (DB values match product strings):
+
+- Category: Billing, Account Access, Technical Issue, Product Question, Refund, Security, Other
+- Priority: Low, Medium, High, Critical
+- Sentiment: Positive, Neutral, Negative, Frustrated
+- Suggested team: Billing, Account Support, Technical Support, Product, Security, General
+
+Generated Prisma Client lives at `src/generated/prisma` (gitignored); run `npx prisma generate` after clone.

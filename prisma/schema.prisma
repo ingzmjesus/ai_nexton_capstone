@@ -1,5 +1,4 @@
 // Prisma schema for the AI Support Ticket Classification System.
-// Domain models (Ticket, Classification) land in Phase 1.
 
 generator client {
   provider     = "prisma-client"
@@ -9,4 +8,71 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum TicketCategory {
+  Billing          @map("Billing")
+  AccountAccess    @map("Account Access")
+  TechnicalIssue   @map("Technical Issue")
+  ProductQuestion  @map("Product Question")
+  Refund           @map("Refund")
+  Security         @map("Security")
+  Other            @map("Other")
+
+  @@map("ticket_category")
+}
+
+enum TicketPriority {
+  Low      @map("Low")
+  Medium   @map("Medium")
+  High     @map("High")
+  Critical @map("Critical")
+
+  @@map("ticket_priority")
+}
+
+enum TicketSentiment {
+  Positive    @map("Positive")
+  Neutral     @map("Neutral")
+  Negative    @map("Negative")
+  Frustrated  @map("Frustrated")
+
+  @@map("ticket_sentiment")
+}
+
+enum SuggestedTeam {
+  Billing            @map("Billing")
+  AccountSupport     @map("Account Support")
+  TechnicalSupport   @map("Technical Support")
+  Product            @map("Product")
+  Security           @map("Security")
+  General            @map("General")
+
+  @@map("suggested_team")
+}
+
+model Ticket {
+  id             String          @id @default(cuid())
+  message        String
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  classification Classification?
+
+  @@map("tickets")
+}
+
+model Classification {
+  id                  String          @id @default(cuid())
+  ticketId            String          @unique @map("ticket_id")
+  category            TicketCategory
+  priority            TicketPriority
+  sentiment           TicketSentiment
+  summary             String
+  suggestedTeam       SuggestedTeam   @map("suggested_team")
+  requiresHumanReview Boolean         @map("requires_human_review")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+  ticket              Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("classifications")
 }
